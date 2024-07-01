@@ -4,73 +4,93 @@ and analyze the results. We are hoping to see interesting patterns
 across patients i.e. the scores matrix.
 
 To-do:
-    Make a nice loop for graphing all the different components.
-    Implement seaborn.
-    Refactor using new filesystem setup (where to outout figures,
-        what files to import, what arguments the functions take, etc.)
-    Change everything to be Fig_Setup -> MakeFig (subplots) like in
-        tfac-mrsa code.
+    Make a function that takes in PCA component data and automatically determines the
+        appropriate size and layout of the graph. Can remove assert once
+        completed.
+    Regenerate plots using recently added gse_healthy data
 """
 
 import numpy as np
 import pandas as pd
+
+from mrsa_ca_rna.import_data import import_mrsa_rna, import_ca_rna, import_GSE_rna, form_matrix
+from mrsa_ca_rna.pca import perform_PCA
+from mrsa_ca_rna.figures.base import setupBase
+import seaborn as sns
 import matplotlib.pyplot as plt
 
-from mrsa_ca_rna.import_data import import_mrsa_rna, import_ca_rna, form_matrix
-from mrsa_ca_rna.pca import perform_PCA
 
-
-def plot_pca():
+def figure01_setup():
     
+    # import mrsa_rna data to generate mrsa labeling
     mrsa_rna = import_mrsa_rna()
-    new_mrsa = np.full((len(mrsa_rna.index),), "mrsa")
-    # mrsa_rna.set_index(new_mrsa, inplace=True)
+    mrsa_label = np.full(len(mrsa_rna.index), "mrsa").T
 
-    ca_rna = import_ca_rna()
-    new_ca = np.full((len(ca_rna.index),), "ca")
-    # ca_rna.set_index(new_ca, inplace=True)
+    # import mrsa_rna data to generate ca labeling
+    ca_pos_rna, ca_neg_rna = import_ca_rna()
+    ca_label = np.full(len(ca_pos_rna.index), "ca").T
 
-    
+    # use previous ca_neg import and any other healthy import to make healthy label
+    gse_rna = import_GSE_rna()
+    healthy_ca = np.full(len(ca_neg_rna.index), "healthy_ca").T
+    healthy_gse = np.full(len(gse_rna.index), "healthy_gse").T
+
+    # make state column for graphing across disease type and healthy
+    state = np.concatenate((mrsa_label, ca_label, healthy_ca, healthy_gse))
 
     rna_mat = form_matrix()
-    rna_decomp, n_components, _ = perform_PCA(rna_mat)
-
-    indeces = np.concatenate((new_mrsa, new_ca))
+    rna_decomp, pca = perform_PCA(rna_mat)
+    
     columns = []
-    for i in range(n_components):
+    for i in range(pca.n_components_):
         columns.append("PC" + str(i+1))
     
-    rna_decomp_df = pd.DataFrame(rna_decomp, indeces, columns)
+    rna_decomp.insert(loc=0, column="state", value=state)
 
-    """
-    figuring out a nicer loop...
-    """
-    disease = ["mrsa", "ca"]
-    colors = ["red", "blue"]
-    fig = plt.figure()
-    for i, color in zip(disease, colors):
-        plt.scatter(rna_decomp_df.loc[i, "PC1"], rna_decomp_df.loc[i, "PC2"], color=color, label=i)
-    plt.legend(loc="best", shadow=False, scatterpoints=1)
-    plt.title("PCA of MRSA and CA RNAseq")
-    plt.xlabel("PC 1")
-    plt.ylabel("PC 2")
-    fig.savefig("loopTest")
+    return rna_decomp
 
-    # use as reference for what I want the loop to accomplish.
-    # fig01 = plt.figure()
-    # plt.scatter(rna_decomp.loc["mrsa","PC1"], rna_decomp.loc["mrsa", "PC2"], color="red")
-    # plt.scatter(rna_decomp.loc["ca","PC1"], rna_decomp.loc["ca", "PC2"], color="blue")
-    # fig01.savefig("fig01")
 
-    # fig02 = plt.figure()
-    # plt.scatter(rna_decomp.loc["mrsa","PC3"], rna_decomp.loc["mrsa", "PC4"], color="red")
-    # plt.scatter(rna_decomp.loc["ca","PC3"], rna_decomp.loc["ca", "PC4"], color="blue")
-    # fig02.savefig("fig02")
+def genFig():
 
-    # fig03 = plt.figure()
-    # plt.scatter(rna_decomp.loc["mrsa","PC5"], rna_decomp.loc["mrsa", "PC6"], color="red")
-    # plt.scatter(rna_decomp.loc["ca","PC5"], rna_decomp.loc["ca", "PC6"], color="blue")
-    # fig03.savefig("fig03")
+    fig_size = (12, 9)
+    layout = {
+        "ncols": 4,
+        "nrows": 3,
+    }
+    ax, f, _ = setupBase(
+        fig_size,
+        layout
+    )
 
-# debug
-plot_pca()
+    data = figure01_setup()
+
+    # modify what components you want to compare to one another:
+    component_pairs = np.array([[1,2],
+                                [1,3],
+                                [2,3],
+                                [2,4],
+                                [3,4],
+                                [3,5],
+                                [4,5],
+                                [4,6],
+                                [5,6],
+                                [5,7],
+                                [6,7],
+                                [7,8]],
+                                dtype=int)
+    
+    assert component_pairs.shape[0] == layout["ncols"]*layout["nrows"], "component pairs to be graphed do not match figure layout size"
+
+    # coincidentally, columns in DataFrames start at 1
+    for i, (j, k) in enumerate(component_pairs):
+        a = sns.scatterplot(data=data.loc[:,(data.columns[j],data.columns[k])], x=data.columns[j], y=data.columns[k], hue=data.loc[:,"state"], ax=ax[i])
+        a.set_xlabel(data.columns[j])
+        a.set_ylabel(data.columns[k])
+        a.set_title(f"Var Comp {data.columns[j]} vs {data.columns[k]}")
+
+
+    return f
+
+"""Debug function call section"""
+fig = genFig()
+fig.savefig("./mrsa_ca_rna/output/fig01_Large_Sequential_compare.png")
